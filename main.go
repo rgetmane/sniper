@@ -248,6 +248,7 @@ var (
 
 	jupiterQuoteURL = "https://api.jup.ag/swap/v1/quote"
 	jupiterSwapURL  = "https://api.jup.ag/swap/v1/swap"
+	jupiterAPIKey   string
 
 	maxBuySOL         = 0.05
 	profitTargetPct   = 100.0
@@ -273,8 +274,23 @@ var (
 func init() {
 	rand.Seed(time.Now().UnixNano())
 
-	if err := godotenv.Load(); err != nil {
-		log.Println("no .env - using defaults")
+	// Try loading secrets.env from multiple locations
+	envPaths := []string{
+		"secrets.env",
+		".env",
+		"/root/sniper/secrets.env",
+		os.Getenv("HOME") + "/.sniper/secrets.env",
+	}
+	loaded := false
+	for _, path := range envPaths {
+		if err := godotenv.Load(path); err == nil {
+			log.Printf("loaded config from %s", path)
+			loaded = true
+			break
+		}
+	}
+	if !loaded {
+		log.Println("no secrets.env or .env found - using environment variables")
 	}
 
 	httpClient = &http.Client{
@@ -368,6 +384,11 @@ func init() {
 	}
 	if v := os.Getenv("JITO_TIP_LAMPORTS"); v != "" {
 		fmt.Sscanf(v, "%d", &jitoTipLamports)
+	}
+
+	jupiterAPIKey = os.Getenv("JUPITER_API_KEY")
+	if jupiterAPIKey != "" {
+		log.Println("Jupiter API key configured")
 	}
 
 	log.Printf("wallet: %s", wallet.PublicKey().String())
@@ -740,6 +761,9 @@ func getJupiterQuote(ctx context.Context, inputMint, outputMint string, amount u
 		if err != nil {
 			continue
 		}
+		if jupiterAPIKey != "" {
+			req.Header.Set("x-api-key", jupiterAPIKey)
+		}
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
@@ -785,6 +809,9 @@ func getJupiterSwap(ctx context.Context, quote map[string]interface{}, priorityF
 			continue
 		}
 		swapReq.Header.Set("Content-Type", "application/json")
+		if jupiterAPIKey != "" {
+			swapReq.Header.Set("x-api-key", jupiterAPIKey)
+		}
 
 		swapResp, err := httpClient.Do(swapReq)
 		if err != nil {
