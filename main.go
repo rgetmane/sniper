@@ -250,16 +250,18 @@ var (
 	jupiterSwapURL  = "https://api.jup.ag/swap/v1/swap"
 	jupiterAPIKey   string
 
-	maxBuySOL         = 0.05
-	profitTargetPct   = 100.0
-	stopLossPct       = 25.0
+	maxBuySOL         = 0.01
+	profitTargetPct   = 30.0
+	stopLossPct       = 10.0
 	maxTopHolder      = 15.0
 	maxRiskScore      = 50.0
-	jitoTipLamports   = uint64(200000)
+	jitoTipLamports   = uint64(100000)
+	minWalletBalance  = 0.03
 	minSlippage       = 200
 	maxSlippage       = 500
 	minPriceThreshold = 0.0001
 	buyCooldown       = 2 * time.Second
+	maxRetries        = 2
 
 	priceCache      = make(map[string][]PriceData)
 	priceCacheMu    sync.RWMutex
@@ -385,6 +387,12 @@ func init() {
 	if v := os.Getenv("JITO_TIP_LAMPORTS"); v != "" {
 		fmt.Sscanf(v, "%d", &jitoTipLamports)
 	}
+	if v := os.Getenv("MIN_WALLET_BALANCE"); v != "" {
+		fmt.Sscanf(v, "%f", &minWalletBalance)
+	}
+	if v := os.Getenv("MAX_RETRIES"); v != "" {
+		fmt.Sscanf(v, "%d", &maxRetries)
+	}
 
 	jupiterAPIKey = os.Getenv("JUPITER_API_KEY")
 	if jupiterAPIKey != "" {
@@ -392,8 +400,8 @@ func init() {
 	}
 
 	log.Printf("wallet: %s", wallet.PublicKey().String())
-	log.Printf("config: buy=%.3f SOL, profit=%.0f%%, stop=%.0f%%, tip=%d lamports",
-		maxBuySOL, profitTargetPct, stopLossPct, jitoTipLamports)
+	log.Printf("config: buy=%.3f SOL, profit=%.0f%%, stop=%.0f%%, tip=%d, minBal=%.2f SOL, retries=%d",
+		maxBuySOL, profitTargetPct, stopLossPct, jitoTipLamports, minWalletBalance, maxRetries)
 	log.Printf("jupiter: %s", jupiterQuoteURL)
 	log.Printf("sender: %s", senderURL)
 }
@@ -448,6 +456,14 @@ func hasEnoughSOL(ctx context.Context) bool {
 		log.Printf("balance check failed: %v", err)
 		return false
 	}
+
+	// Guard: pause all buys if wallet below minimum threshold
+	minBalanceLamports := uint64(minWalletBalance * 1e9)
+	if balance < minBalanceLamports {
+		log.Printf("wallet too low: %.4f SOL < %.4f SOL minimum - pausing buys", float64(balance)/1e9, minWalletBalance)
+		return false
+	}
+
 	required := uint64(maxBuySOL*1e9) + jitoTipLamports*2 + 10000
 	if balance < required {
 		log.Printf("low SOL: have %d, need %d lamports", balance, required)
@@ -592,7 +608,7 @@ func processCreate(ctx context.Context, tx solana.Signature, detectTime time.Tim
 	var res *rpc.GetTransactionResult
 	var err error
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < maxRetries; i++ {
 		res, err = client.GetTransaction(ctx, tx, &rpc.GetTransactionOpts{
 			MaxSupportedTransactionVersion: func() *uint64 { v := uint64(0); return &v }(),
 			Commitment:                     rpc.CommitmentConfirmed,
@@ -756,7 +772,7 @@ func getJupiterQuote(ctx context.Context, inputMint, outputMint string, amount u
 		jupiterQuoteURL, inputMint, outputMint, amount, slippage)
 
 	var quote map[string]interface{}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < maxRetries; i++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, quoteURL, nil)
 		if err != nil {
 			continue
@@ -803,7 +819,7 @@ func getJupiterSwap(ctx context.Context, quote map[string]interface{}, priorityF
 	body, _ := json.Marshal(swapBody)
 
 	var swap map[string]interface{}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < maxRetries; i++ {
 		swapReq, err := http.NewRequestWithContext(ctx, http.MethodPost, jupiterSwapURL, bytes.NewReader(body))
 		if err != nil {
 			continue
@@ -930,7 +946,7 @@ func buy(ctx context.Context, mint string, rugCheck *RugCheckResponse, topHolder
 
         log.Printf("buy signed with %d signatures, slippage=%dbps", len(signatures), slippage)
 
-	sig, err := sendWithRetry(ctx, transaction, 3)
+	sig, err := sendWithRetry(ctx, transaction)
 	if err != nil {
 		log.Println("send fail:", err)
 		setFailedBuy()
@@ -962,7 +978,7 @@ func buy(ctx context.Context, mint string, rugCheck *RugCheckResponse, topHolder
 	go monitorPosition(ctx, mint, rugCheck.TokenMeta.Symbol, maxBuySOL, buyTime)
 }
 
-func sendWithRetry(ctx context.Context, tx *solana.Transaction, maxRetries int) (solana.Signature, error) {
+func sendWithRetry(ctx context.Context, tx *solana.Transaction) (solana.Signature, error) {
 	var lastErr error
 
 	for i := 0; i < maxRetries; i++ {
@@ -976,7 +992,7 @@ func sendWithRetry(ctx context.Context, tx *solana.Transaction, maxRetries int) 
 		}
 
 		lastErr = err
-		log.Printf("send attempt %d failed: %v", i+1, err)
+		log.Printf("send attempt %d/%d failed: %v", i+1, maxRetries, err)
 
 		if i < maxRetries-1 {
 			time.Sleep(time.Duration(50*(i+1)) * time.Millisecond)
@@ -1188,7 +1204,7 @@ func executeSell(ctx context.Context, mint string) (string, float64, error) {
 
         log.Printf("buy signed with %d signatures, slippage=%dbps", len(signatures), slippage)
 
-	sig, err := sendWithRetry(ctx, transaction, 3)
+	sig, err := sendWithRetry(ctx, transaction)
 	if err != nil {
 		return "", 0, fmt.Errorf("send: %w", err)
 	}
