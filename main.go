@@ -716,6 +716,9 @@ func handleToken(ctx context.Context, sig solana.Signature) {
 	// ENHANCED SAFETY CHECK: Comprehensive honeypot/rug-pull detection
 	safetyResult := isSafeToken(ctx, mint)
 	if !safetyResult.Safe {
+		blockMsg := fmt.Sprintf("🔴 <b>SAFETY BLOCKED</b> — Guard Engaged\nToken: %s\nReason: %s\nDetails: %s", 
+			mint[:16]+"...", safetyResult.Reason, safetyResult.Details)
+		sendTelegram(blockMsg)
 		log.Printf("SAFETY: %s REJECTED - %s: %s", mint, safetyResult.Reason, safetyResult.Details)
 		addToBlacklist(mint, safetyResult.Reason)
 		return
@@ -1825,21 +1828,30 @@ func sendTelegram(msg string) {
 	urlStr := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s&parse_mode=HTML",
 		tok, chat, url.QueryEscape(msg))
 
-	for i := 0; i < 2; i++ {
+	// Enhanced retry with exponential backoff: 1s → 2s → 4s
+	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
+	for i := 0; i < 3; i++ {
 		resp, err := http.Get(urlStr)
 		if err != nil {
-			log.Printf("TELEGRAM: send fail: %v", err)
-			if i < 1 {
-				time.Sleep(1 * time.Second)
+			log.Printf("TELEGRAM: send fail (attempt %d/3): %v", i+1, err)
+			if i < 2 {
+				time.Sleep(backoffs[i])
 				continue
 			}
 			break
 		}
 		resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			log.Printf("TELEGRAM: error %d", resp.StatusCode)
+			log.Printf("TELEGRAM: error %d (attempt %d/3)", resp.StatusCode, i+1)
+			if i < 2 {
+				time.Sleep(backoffs[i])
+				continue
+			}
+			break
 		}
-		break
+		// Success
+		log.Printf("TELEGRAM: SENT ✓")
+		return
 	}
 }
 

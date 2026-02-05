@@ -241,6 +241,54 @@ def api_status():
     })
 
 
+@app.route("/test/telegram-alert", methods=["POST"])
+def test_telegram_alert():
+    """Trigger a test Telegram alert via cURL."""
+    import urllib.request
+    import json as json_lib
+    
+    alert_type = request.json.get("type", "buy") if request.json else "buy"
+    token = cfg("TELEGRAM_TOKEN")
+    chat_id = cfg("CHAT_ID")
+    
+    if not token or not chat_id:
+        return jsonify({"error": "TELEGRAM_TOKEN or CHAT_ID not configured"}), 500
+    
+    # Generate alert message based on type
+    messages = {
+        "buy": "🟢 <b>BUY EXECUTED</b>\nToken: TEST_TOKEN\nEntry: 0.01 SOL",
+        "sell": "✅ <b>SELL — PROFIT</b>\nToken: TEST_TOKEN\nExit: +25%",
+        "safety_block": "🔴 <b>SAFETY BLOCKED</b>\nReason: High rug risk",
+        "low_balance": "⚠️ <b>LOW BALANCE</b>\nCurrent: 0.015 SOL",
+        "forensic": "🔥 <b>FORENSIC LOCK</b>\nFailed buys: 3/3",
+    }
+    
+    msg = messages.get(alert_type, messages["buy"])
+    
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "HTML"
+        }
+        data = json_lib.dumps(payload).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json_lib.load(resp)
+            if result.get("ok"):
+                return jsonify({"success": True, "message": f"✅ {alert_type} alert sent"}), 200
+            else:
+                error = result.get("description", "Unknown error")
+                return jsonify({"error": error}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     print(f"\n  MOLD SNIPER DASHBOARD")
     print(f"  http://localhost:5000\n")
