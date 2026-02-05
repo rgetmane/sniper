@@ -1,0 +1,25 @@
+# Secrets — never commit
+secrets.env
+.env
+
+# Binary
+sniper
+mold
+
+# Database
+sniper.db
+sniper.db-shm
+sniper.db-wal
+
+# Logs
+*.log
+
+# Memory
+sniper_memory.json
+
+# Backups
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db
