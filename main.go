@@ -127,9 +127,11 @@ type LiquidityDetails struct {
 
 // Enhanced safety check result
 type SafetyCheckResult struct {
-	Safe    bool
-	Reason  string
-	Details string
+	Safe        bool
+	Reason      string
+	Details     string
+	SlippageBps int     // volume-tier slippage override (0 = use default)
+	BuySizeSOL  float64 // volume-tier buy size override (0 = use config)
 }
 
 // RPC mint account data
@@ -727,7 +729,12 @@ func handleToken(ctx context.Context, sig solana.Signature) {
 		return
 	}
 
-	need := config.MaxBuySOL + 0.005
+	// Use volume-tier buy size for balance check
+	buySize := safetyResult.BuySizeSOL
+	if buySize <= 0 {
+		buySize = config.MaxBuySOL
+	}
+	need := buySize + 0.005
 	if bal < need {
 		log.Printf("BALANCE: insufficient %.4f < %.4f SOL", bal, need)
 		return
@@ -738,8 +745,8 @@ func handleToken(ctx context.Context, sig solana.Signature) {
 		symbol = "???"
 	}
 
-	log.Printf("BUY: %s (%s) score=%.0f", mint, symbol, rug.Score)
-	buy(ctx, mint, symbol, rug.Score)
+	log.Printf("BUY: %s (%s) score=%.0f slip=%dbps size=%.3fSOL", mint, symbol, rug.Score, safetyResult.SlippageBps, buySize)
+	buy(ctx, mint, symbol, rug.Score, safetyResult.SlippageBps, buySize)
 }
 
 func parseMint(tx *rpc.GetTransactionResult) string {
@@ -856,13 +863,131 @@ func isSafeToken(ctx context.Context, mint string) SafetyCheckResult {
 	// Step 2: RPC-based mint/freeze authority check
 	rpcResult := checkMintAuthorities(ctx, mint)
 	if !rpcResult.Safe {
-		sendTelegram(fmt.Sprintf("⚠️ Authority risk on %s\n%s\nDetails: %s", 
+		sendTelegram(fmt.Sprintf("⚠️ Authority risk on %s\n%s\nDetails: %s",
 			mint, rpcResult.Reason, rpcResult.Details))
 		return rpcResult
 	}
 
-	// All checks passed
-	return SafetyCheckResult{Safe: true, Reason: "all_checks_passed", Details: "Token passed all safety checks"}
+	// Step 3: Volume momentum filter via Dexscreener
+	volResult := checkVolumeMomentum(ctx, mint)
+	if !volResult.Safe {
+		return volResult
+	}
+
+	// All checks passed — carry volume tier through
+	return SafetyCheckResult{
+		Safe:        true,
+		Reason:      "all_checks_passed",
+		Details:     fmt.Sprintf("Token passed all safety checks | %s", volResult.Details),
+		SlippageBps: volResult.SlippageBps,
+		BuySizeSOL:  volResult.BuySizeSOL,
+	}
+}
+
+// checkVolumeMomentum queries Dexscreener for 5-min volume to filter flat tokens
+// and dynamically size position + slippage based on momentum.
+func checkVolumeMomentum(ctx context.Context, mint string) SafetyCheckResult {
+	dexURL := fmt.Sprintf("https://api.dexscreener.com/latest/dex/tokens/%s", mint)
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", dexURL, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode == 429 {
+			lastErr = fmt.Errorf("rate limited (429)")
+			log.Printf("VOLUME: %s Dexscreener 429 — backing off %ds", mint, (attempt+1)*5)
+			time.Sleep(time.Duration(attempt+1) * 5 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			lastErr = fmt.Errorf("status %d", resp.StatusCode)
+			continue
+		}
+
+		var data struct {
+			Pairs []struct {
+				Volume struct {
+					M5 float64 `json:"m5"`
+					H1 float64 `json:"h1"`
+				} `json:"volume"`
+			} `json:"pairs"`
+		}
+
+		if err := json.Unmarshal(body, &data); err != nil {
+			lastErr = err
+			continue
+		}
+
+		// No pairs yet — token just launched, allow with defaults
+		if len(data.Pairs) == 0 {
+			log.Printf("VOLUME: %s no pairs on Dexscreener yet, using defaults", mint)
+			return SafetyCheckResult{
+				Safe: true, Reason: "volume_no_data",
+				Details:     "No Dexscreener data, using defaults",
+				SlippageBps: 500, BuySizeSOL: config.MaxBuySOL,
+			}
+		}
+
+		vol5m := data.Pairs[0].Volume.M5
+
+		// REJECT: flat token
+		if vol5m < 20000 {
+			log.Printf("LOW VOLUME: %s $%.0f (5min) — skipping flat token", mint, vol5m)
+			return SafetyCheckResult{
+				Safe:   false,
+				Reason: "low_volume",
+				Details: fmt.Sprintf("5min vol $%.0f < $20,000", vol5m),
+			}
+		}
+
+		// TIER 2: high momentum
+		if vol5m > 100000 {
+			log.Printf("VOLUME: %s $%.0f (5min) — HIGH MOMENTUM, sizing up", mint, vol5m)
+			return SafetyCheckResult{
+				Safe: true, Reason: "high_volume",
+				Details:     fmt.Sprintf("5min vol $%.0f", vol5m),
+				SlippageBps: 1000, BuySizeSOL: 0.03,
+			}
+		}
+
+		// TIER 1: normal momentum
+		log.Printf("VOLUME: %s $%.0f (5min) — momentum confirmed", mint, vol5m)
+		return SafetyCheckResult{
+			Safe: true, Reason: "volume_ok",
+			Details:     fmt.Sprintf("5min vol $%.0f", vol5m),
+			SlippageBps: 800, BuySizeSOL: 0.02,
+		}
+	}
+
+	// All 3 retries failed — fallback: allow buy with defaults (RPC-only mode)
+	log.Printf("VOLUME: %s Dexscreener failed after 3 retries: %v — fallback to defaults", mint, lastErr)
+	return SafetyCheckResult{
+		Safe: true, Reason: "volume_api_fail",
+		Details:     "Dexscreener unavailable, using defaults",
+		SlippageBps: 500, BuySizeSOL: config.MaxBuySOL,
+	}
 }
 
 // checkRugCheckEnhanced performs enhanced RugCheck API validation
@@ -1100,7 +1225,7 @@ func checkRugCheck(ctx context.Context, mint string) (*RugCheckResponse, error) 
 // BUY FLOW
 // ============================================================================
 
-func buy(ctx context.Context, mint, symbol string, score float64) {
+func buy(ctx context.Context, mint, symbol string, score float64, volSlippage int, volBuySOL float64) {
 	mu.Lock()
 	lastBuyTime = time.Now()
 	mu.Unlock()
@@ -1119,10 +1244,22 @@ func buy(ctx context.Context, mint, symbol string, score float64) {
 	}
 	activePosMu.RUnlock()
 
-	wallet := currentWallet()
-	amt := uint64(config.MaxBuySOL * 1e9)
+	// Volume-tier buy size (fallback to config)
+	buySOL := volBuySOL
+	if buySOL <= 0 {
+		buySOL = config.MaxBuySOL
+	}
 
-	quote, err := jupiterQuote(ctx, solMint, mint, amt, 500)
+	// Volume-tier base slippage (fallback to 500 bps)
+	baseSlip := volSlippage
+	if baseSlip <= 0 {
+		baseSlip = 500
+	}
+
+	wallet := currentWallet()
+	amt := uint64(buySOL * 1e9)
+
+	quote, err := jupiterQuote(ctx, solMint, mint, amt, baseSlip)
 	if err != nil {
 		log.Printf("BUY: quote failed: %v", err)
 		incrementStat("failed_buys")
@@ -1140,8 +1277,12 @@ func buy(ctx context.Context, mint, symbol string, score float64) {
 	}
 
 	slip := calculateSlippage(outAmt, priceImpact)
+	// Volume-tier minimum — never go below what momentum demands
+	if volSlippage > slip {
+		slip = volSlippage
+	}
 
-	if slip != 500 {
+	if slip != baseSlip {
 		quote, err = jupiterQuote(ctx, solMint, mint, amt, slip)
 		if err != nil {
 			log.Printf("BUY: re-quote failed: %v", err)

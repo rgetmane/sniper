@@ -1,0 +1,19 @@
+{
+  "task": "Create a web scraper that extracts product data from e-commerce sites",
+  "planner_model": "claude-3-5-sonnet-20241022",
+  "coder_model": "gpt-4o",
+  "reviewer_model": "o1-mini",
+  "supervisor_model": "gpt-4o-mini",
+  "use_supervisor": false,
+  "max_iterations": 3,
+  "enable_memory": false,
+  "memory_path": "agent_memory.db",
+  "planner_temperature": 0.2,
+  "planner_max_tokens": 8192,
+  "coder_temperature": 0.1,
+  "coder_max_tokens": 16384,
+  "reviewer_temperature": 0.2,
+  "reviewer_max_tokens": 8192,
+  "log_level": "INFO",
+  "output_file": "scraper.py"
+}

@@ -1,0 +1,35 @@
+# Multi-Agent System Configuration (YAML)
+# This file demonstrates all available configuration options
+
+# Task description (required)
+task: "Build a REST API with FastAPI for managing a task list with CRUD operations"
+
+# Model configuration
+planner_model: "claude-3-5-sonnet-20241022"
+coder_model: "gpt-4o"
+reviewer_model: "o1-mini"
+supervisor_model: "gpt-4o-mini"
+
+# Agent behavior
+use_supervisor: false
+max_iterations: 3
+
+# Memory/persistence
+enable_memory: false
+memory_path: "agent_memory.db"
+
+# Model parameters
+planner_temperature: 0.2
+planner_max_tokens: 8192
+
+coder_temperature: 0.1
+coder_max_tokens: 16384
+
+reviewer_temperature: 0.2
+reviewer_max_tokens: 8192
+
+# Logging
+log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+# Output
+output_file: "generated_code.py"

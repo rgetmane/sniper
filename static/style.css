@@ -1,0 +1,424 @@
+/* MOLD SNIPER BOT — Dashboard Theme */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #1c2128;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --cyan: #39d353;
+    --orange: #db6d28;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 1px;
+}
+
+.version {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+}
+
+.status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-dot.dead { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+.refresh-timer {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+
+.container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto 1fr;
+    gap: 1px;
+    background: var(--border);
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.panel {
+    background: var(--bg-primary);
+    padding: 16px;
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+}
+
+.panel-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+
+/* ── Stats Cards ────────────────────────────────────────────────────────── */
+
+.stats-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1px;
+    background: var(--border);
+}
+
+.stat-card {
+    background: var(--bg-primary);
+    padding: 16px;
+    text-align: center;
+}
+
+.stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.stat-value {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.stat-value.green { color: var(--green); }
+.stat-value.red { color: var(--red); }
+.stat-value.blue { color: var(--blue); }
+.stat-value.yellow { color: var(--yellow); }
+.stat-value.purple { color: var(--purple); }
+
+.stat-sub {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+/* ── Wallet Panel ───────────────────────────────────────────────────────── */
+
+.wallet-info {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.wallet-address {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-secondary);
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+}
+
+.wallet-address code {
+    color: var(--cyan);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.btn-copy {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    transition: all 0.15s;
+}
+
+.btn-copy:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+.wallet-balance {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--green);
+}
+
+.wallet-balance span {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.config-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}
+
+.config-key {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.config-val {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ── Trades Table ───────────────────────────────────────────────────────── */
+
+.trades-panel {
+    grid-column: 1 / -1;
+}
+
+.table-wrap {
+    overflow-x: auto;
+    max-height: 340px;
+    overflow-y: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+th {
+    background: var(--bg-secondary);
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--bg-secondary);
+    white-space: nowrap;
+}
+
+tr:hover td {
+    background: var(--bg-secondary);
+}
+
+.mint-addr {
+    color: var(--blue);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.pnl-pos { color: var(--green); font-weight: 600; }
+.pnl-neg { color: var(--red); font-weight: 600; }
+.pnl-zero { color: var(--text-muted); }
+
+.tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.tag-buy { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.tag-sell { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.tag-hold { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
+
+.empty-state {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* ── Logs Panel ─────────────────────────────────────────────────────────── */
+
+.logs-panel {
+    grid-column: 1 / -1;
+}
+
+.log-filters {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.log-filter {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 3px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    transition: all 0.15s;
+}
+
+.log-filter:hover { border-color: var(--text-muted); }
+.log-filter.active {
+    background: var(--blue);
+    color: var(--bg-primary);
+    border-color: var(--blue);
+    font-weight: 600;
+}
+
+.log-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.log-line {
+    padding: 1px 0;
+    word-break: break-all;
+}
+
+.log-line .ts { color: var(--text-muted); }
+.log-line .tag-safety { color: var(--yellow); font-weight: 600; }
+.log-line .tag-skip { color: var(--text-muted); }
+.log-line .tag-balance { color: var(--orange); font-weight: 600; }
+.log-line .tag-health { color: var(--red); font-weight: 600; }
+.log-line .tag-rugcheck { color: var(--purple); font-weight: 600; }
+.log-line .tag-buy { color: var(--green); font-weight: 600; }
+.log-line .tag-sell { color: var(--cyan); font-weight: 600; }
+.log-line .tag-pump { color: var(--blue); font-weight: 600; }
+.log-line .tag-db { color: var(--text-secondary); }
+.log-line .tag-warn { color: var(--yellow); }
+
+.log-line .passed { color: var(--green); }
+.log-line .rejected { color: var(--red); }
+
+/* ── Chart ──────────────────────────────────────────────────────────────── */
+
+.chart-container {
+    position: relative;
+    height: 260px;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+    .container {
+        grid-template-columns: 1fr;
+    }
+    .trades-panel, .logs-panel, .stats-row {
+        grid-column: 1;
+    }
+    .config-grid {
+        grid-template-columns: 1fr;
+    }
+}

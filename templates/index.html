@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOLD SNIPER</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <div class="header-left">
+        <span class="logo">MOLD SNIPER</span>
+        <span class="version">v2.0</span>
+        <span id="bot-status"><span class="status-dot dead"></span>OFFLINE</span>
+    </div>
+    <div class="header-right">
+        <span id="uptime" style="color: var(--text-muted); font-size: 11px;"></span>
+        <span class="refresh-timer" id="timer">10s</span>
+    </div>
+</div>
+
+<!-- Stats Row -->
+<div class="container">
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">SOL Balance</div>
+            <div class="stat-value green" id="s-balance">--</div>
+            <div class="stat-sub">SOL</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Buys</div>
+            <div class="stat-value blue" id="s-buys">0</div>
+            <div class="stat-sub">tokens bought</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Sells</div>
+            <div class="stat-value purple" id="s-sells">0</div>
+            <div class="stat-sub">tokens sold</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Win / Loss</div>
+            <div class="stat-value" id="s-wl"><span class="green">0</span> / <span class="red">0</span></div>
+            <div class="stat-sub">trades</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total P&amp;L</div>
+            <div class="stat-value" id="s-pnl">0.000</div>
+            <div class="stat-sub">SOL</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Rugs Caught</div>
+            <div class="stat-value red" id="s-rugs">0</div>
+            <div class="stat-sub">blacklisted</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Blacklist</div>
+            <div class="stat-value yellow" id="s-blacklist">0</div>
+            <div class="stat-sub">total mints</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Best Day</div>
+            <div class="stat-value green" id="s-bestday">0%</div>
+            <div class="stat-sub">single day P&amp;L</div>
+        </div>
+    </div>
+
+    <!-- Wallet Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <span class="panel-title">Wallet</span>
+        </div>
+        <div class="wallet-info">
+            <div class="wallet-address">
+                <code id="wallet-addr">loading...</code>
+                <button class="btn-copy" onclick="copyAddr()">COPY</button>
+            </div>
+            <div class="wallet-balance" id="wallet-bal">-- <span>SOL</span></div>
+            <div class="panel-header" style="margin-top:8px">
+                <span class="panel-title">Config</span>
+            </div>
+            <div class="config-grid" id="config-grid"></div>
+        </div>
+    </div>
+
+    <!-- Chart Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <span class="panel-title">Daily P&amp;L</span>
+        </div>
+        <div class="chart-container">
+            <canvas id="pnl-chart"></canvas>
+        </div>
+    </div>
+
+    <!-- Trades Table -->
+    <div class="panel trades-panel">
+        <div class="panel-header">
+            <span class="panel-title">Trades</span>
+            <span class="panel-badge" id="trade-count">0 trades</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Mint</th>
+                        <th>Symbol</th>
+                        <th>Score</th>
+                        <th>Status</th>
+                        <th>Buy Price</th>
+                        <th>Sell Price</th>
+                        <th>P&amp;L</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="trades-body">
+                    <tr><td colspan="9" class="empty-state">No trades yet. Fund wallet to start sniping.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Logs Panel -->
+    <div class="panel logs-panel">
+        <div class="panel-header">
+            <span class="panel-title">Live Logs</span>
+            <span class="panel-badge" id="log-count">0 lines</span>
+        </div>
+        <div class="log-filters">
+            <button class="log-filter active" data-filter="ALL">ALL</button>
+            <button class="log-filter" data-filter="SAFETY">SAFETY</button>
+            <button class="log-filter" data-filter="BUY">BUY</button>
+            <button class="log-filter" data-filter="SELL">SELL</button>
+            <button class="log-filter" data-filter="BALANCE">BALANCE</button>
+            <button class="log-filter" data-filter="HEALTH">HEALTH</button>
+            <button class="log-filter" data-filter="RUGCHECK">RUGCHECK</button>
+            <button class="log-filter" data-filter="SKIP">SKIP</button>
+            <button class="log-filter" data-filter="PUMP">PUMP</button>
+        </div>
+        <div class="log-box" id="log-box"></div>
+    </div>
+</div>
+
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+let logFilter = "ALL";
+let countdown = 10;
+let pnlChart = null;
+
+// ── API Fetchers ────────────────────────────────────────────────────────────
+async function fetchJSON(url) {
+    try {
+        const r = await fetch(url);
+        return await r.json();
+    } catch { return null; }
+}
+
+async function refreshAll() {
+    await Promise.all([
+        refreshStatus(),
+        refreshWallet(),
+        refreshStats(),
+        refreshTrades(),
+        refreshLogs(),
+    ]);
+}
+
+async function refreshStatus() {
+    const d = await fetchJSON("/api/status");
+    if (!d) return;
+    const el = document.getElementById("bot-status");
+    if (d.running) {
+        el.innerHTML = '<span class="status-dot live"></span>LIVE';
+    } else {
+        el.innerHTML = '<span class="status-dot dead"></span>OFFLINE';
+    }
+    document.getElementById("uptime").textContent = d.uptime ? "up " + d.uptime : "";
+
+    // Config
+    const grid = document.getElementById("config-grid");
+    const cfgMap = {
+        "Buy Size": d.config.max_buy_sol + " SOL",
+        "Profit": "+" + d.config.profit_target + "%",
+        "Stop Loss": "-" + d.config.stop_loss + "%",
+        "Trail Drop": d.config.trail_drop + "%",
+        "Rug Score": ">=" + d.config.min_rug_score,
+        "Jito Tip": (d.config.jito_tip / 1e6).toFixed(1) + "M lam",
+        "Simulate": d.config.simulate,
+    };
+    grid.innerHTML = Object.entries(cfgMap).map(([k,v]) =>
+        `<div class="config-item"><span class="config-key">${k}</span><span class="config-val">${v}</span></div>`
+    ).join("");
+}
+
+async function refreshWallet() {
+    const d = await fetchJSON("/api/wallet");
+    if (!d) return;
+    document.getElementById("wallet-addr").textContent = d.address;
+    document.getElementById("wallet-bal").innerHTML = d.balance_sol.toFixed(4) + ' <span>SOL</span>';
+    document.getElementById("s-balance").textContent = d.balance_sol.toFixed(4);
+}
+
+async function refreshStats() {
+    const d = await fetchJSON("/api/stats");
+    if (!d) return;
+    document.getElementById("s-buys").textContent = d.total_buys;
+    document.getElementById("s-sells").textContent = d.total_sells;
+    document.getElementById("s-wl").innerHTML =
+        `<span class="green">${d.wins}</span> / <span class="red">${d.losses}</span>`;
+    const pnlEl = document.getElementById("s-pnl");
+    pnlEl.textContent = d.total_pnl.toFixed(4);
+    pnlEl.className = "stat-value " + (d.total_pnl > 0 ? "green" : d.total_pnl < 0 ? "red" : "");
+    document.getElementById("s-rugs").textContent = d.memory.rugs_caught;
+    document.getElementById("s-blacklist").textContent = d.blacklist_count;
+    document.getElementById("s-bestday").textContent = d.memory.best_day_pct.toFixed(1) + "%";
+
+    // Chart
+    updateChart(d.daily_pnl);
+}
+
+async function refreshTrades() {
+    const trades = await fetchJSON("/api/trades");
+    if (!trades) return;
+    const body = document.getElementById("trades-body");
+    document.getElementById("trade-count").textContent = trades.length + " trades";
+
+    if (!trades.length) {
+        body.innerHTML = '<tr><td colspan="9" class="empty-state">No trades yet. Fund wallet to start sniping.</td></tr>';
+        return;
+    }
+    body.innerHTML = trades.map(t => {
+        const pnlClass = t.pnl > 0 ? "pnl-pos" : t.pnl < 0 ? "pnl-neg" : "pnl-zero";
+        const status = t.sold ? '<span class="tag tag-sell">SOLD</span>' :
+                       t.bought ? '<span class="tag tag-hold">HOLD</span>' :
+                       '<span class="tag tag-buy">BUY</span>';
+        const mint = t.mint || "";
+        const short = mint.slice(0, 6) + "..." + mint.slice(-4);
+        return `<tr>
+            <td>${t.buytime || "--"}</td>
+            <td><span class="mint-addr" title="${mint}">${short}</span></td>
+            <td>${t.symbol || "--"}</td>
+            <td>${t.score ? t.score.toFixed(0) : "--"}</td>
+            <td>${status}</td>
+            <td>${t.buyprice ? t.buyprice.toFixed(8) : "--"}</td>
+            <td>${t.sellprice ? t.sellprice.toFixed(8) : "--"}</td>
+            <td class="${pnlClass}">${t.pnl ? (t.pnl > 0 ? "+" : "") + t.pnl.toFixed(4) : "--"}</td>
+            <td>${t.reason || "--"}</td>
+        </tr>`;
+    }).join("");
+}
+
+async function refreshLogs() {
+    const d = await fetchJSON("/api/logs?lines=200");
+    if (!d) return;
+    const box = document.getElementById("log-box");
+    document.getElementById("log-count").textContent = d.total + " lines";
+
+    const lines = d.lines.map(line => {
+        // Parse tag from log line
+        let tagClass = "";
+        let tagLabel = "";
+        const upper = line.toUpperCase();
+        if (upper.includes("SAFETY:")) { tagClass = "tag-safety"; tagLabel = "SAFETY"; }
+        else if (upper.includes("SKIP:")) { tagClass = "tag-skip"; tagLabel = "SKIP"; }
+        else if (upper.includes("BALANCE:")) { tagClass = "tag-balance"; tagLabel = "BALANCE"; }
+        else if (upper.includes("HEALTH:")) { tagClass = "tag-health"; tagLabel = "HEALTH"; }
+        else if (upper.includes("RUGCHECK:")) { tagClass = "tag-rugcheck"; tagLabel = "RUGCHECK"; }
+        else if (upper.includes("BUY:") || upper.includes("BOUGHT")) { tagClass = "tag-buy"; tagLabel = "BUY"; }
+        else if (upper.includes("SELL:") || upper.includes("SOLD")) { tagClass = "tag-sell"; tagLabel = "SELL"; }
+        else if (upper.includes("PUMP:")) { tagClass = "tag-pump"; tagLabel = "PUMP"; }
+        else if (upper.includes("WARN:")) { tagClass = "tag-warn"; tagLabel = "WARN"; }
+        else if (upper.includes("DB:")) { tagClass = "tag-db"; tagLabel = "DB"; }
+
+        return { raw: line, tag: tagLabel, tagClass, html: formatLogLine(line, tagClass) };
+    });
+
+    // Apply filter
+    const filtered = logFilter === "ALL" ? lines : lines.filter(l => l.tag === logFilter);
+
+    box.innerHTML = filtered.map(l => l.html).join("");
+
+    // Auto-scroll to bottom
+    box.scrollTop = box.scrollHeight;
+}
+
+function formatLogLine(line, tagClass) {
+    // Color timestamp
+    let html = line.replace(/^(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+/, '<span class="ts">$1</span> ');
+    // Color tag
+    if (tagClass) {
+        const tags = ["SAFETY:", "SKIP:", "BALANCE:", "HEALTH:", "RUGCHECK:", "PUMP:", "WARN:", "DB:", "BUY:", "SELL:"];
+        for (const t of tags) {
+            if (html.includes(t)) {
+                html = html.replace(t, `<span class="${tagClass}">${t}</span>`);
+                break;
+            }
+        }
+    }
+    // Color PASSED / REJECTED
+    html = html.replace(/PASSED/g, '<span class="passed">PASSED</span>');
+    html = html.replace(/REJECTED/g, '<span class="rejected">REJECTED</span>');
+
+    return `<div class="log-line">${html}</div>`;
+}
+
+// ── Chart ────────────────────────────────────────────────────────────────────
+function updateChart(dailyPnl) {
+    const ctx = document.getElementById("pnl-chart");
+    const labels = (dailyPnl || []).map(d => d.day).reverse();
+    const values = (dailyPnl || []).map(d => d.pnl).reverse();
+    const colors = values.map(v => v >= 0 ? "#3fb950" : "#f85149");
+
+    if (pnlChart) {
+        pnlChart.data.labels = labels;
+        pnlChart.data.datasets[0].data = values;
+        pnlChart.data.datasets[0].backgroundColor = colors;
+        pnlChart.update();
+        return;
+    }
+
+    pnlChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: labels.length ? labels : ["No data"],
+            datasets: [{
+                label: "P&L (SOL)",
+                data: values.length ? values : [0],
+                backgroundColor: colors.length ? colors : ["#30363d"],
+                borderRadius: 3,
+                maxBarThickness: 40,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: "#161b22",
+                    borderColor: "#30363d",
+                    borderWidth: 1,
+                    titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
+                    bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+                },
+            },
+            scales: {
+                x: {
+                    ticks: { color: "#484f58", font: { family: "'JetBrains Mono', monospace", size: 10 } },
+                    grid: { color: "#21262d" },
+                },
+                y: {
+                    ticks: { color: "#484f58", font: { family: "'JetBrains Mono', monospace", size: 10 } },
+                    grid: { color: "#21262d" },
+                },
+            },
+        },
+    });
+}
+
+// ── Filter Buttons ──────────────────────────────────────────────────────────
+document.querySelectorAll(".log-filter").forEach(btn => {
+    btn.addEventListener("click", () => {
+        document.querySelectorAll(".log-filter").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        logFilter = btn.dataset.filter;
+        refreshLogs();
+    });
+});
+
+// ── Copy Address ────────────────────────────────────────────────────────────
+function copyAddr() {
+    const addr = document.getElementById("wallet-addr").textContent;
+    navigator.clipboard.writeText(addr).then(() => {
+        const btn = document.querySelector(".btn-copy");
+        btn.textContent = "OK!";
+        setTimeout(() => btn.textContent = "COPY", 1500);
+    });
+}
+
+// ── Auto-refresh ────────────────────────────────────────────────────────────
+refreshAll();
+setInterval(() => {
+    countdown--;
+    document.getElementById("timer").textContent = countdown + "s";
+    if (countdown <= 0) {
+        countdown = 10;
+        refreshAll();
+    }
+}, 1000);
+</script>
+</body>
+</html>

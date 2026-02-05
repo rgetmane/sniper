@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl bash -c \"cd /home/roman/sniper && chmod +x run.sh && go mod tidy && go build -o mold 2>&1\")",
+      "Bash(wsl bash:*)",
+      "Bash(wsl -e bash -c \"pip3 install flask requests 2>&1 | tail -5\")",
+      "Bash(wsl -e bash -c \"pip3 install --break-system-packages flask requests 2>&1 | tail -5\")",
+      "Bash(wsl -e bash -c:*)"
+    ]
+  }
+}
