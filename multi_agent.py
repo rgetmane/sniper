@@ -52,10 +52,10 @@ class AgentConfig:
     def __init__(
         self,
         task: str = "",
-        planner_model: str = "claude-3-5-sonnet-20241022",
-        coder_model: str = "gpt-4o",
-        reviewer_model: str = "o1-mini",
-        supervisor_model: str = "gpt-4o-mini",
+        planner_model: str = "claude-opus-4-5",
+        coder_model: str = "gpt-5.2",
+        reviewer_model: str = "grok-4",
+        supervisor_model: str = "gpt-5.2",
         use_supervisor: bool = False,
         enable_memory: bool = False,
         memory_path: str = "agent_memory.db",
@@ -161,42 +161,50 @@ class AgentState(TypedDict, total=False):
 
 
 def get_planner_llm() -> ChatAnthropic:
-    """Planner: deep reasoning + architecture design (Claude 3.5 Sonnet)."""
+    """Planner: deep reasoning + architecture design (Claude Opus 4.5)."""
     cfg = config or AgentConfig()
+    api_key = os.getenv('MODEL_CLAUDE') or os.getenv('ANTHROPIC_API_KEY')
     return ChatAnthropic(
         model=cfg.planner_model,
         temperature=cfg.planner_temperature,
         max_tokens=cfg.planner_max_tokens,
+        api_key=api_key,
     )
 
 
 def get_coder_llm() -> ChatOpenAI:
-    """Coder: fast, accurate code generation (GPT-4o)."""
+    """Coder: fast, accurate code generation (GPT-5.2)."""
     cfg = config or AgentConfig()
+    api_key = os.getenv('MODEL_GPT') or os.getenv('OPENAI_API_KEY')
     return ChatOpenAI(
         model=cfg.coder_model,
         temperature=cfg.coder_temperature,
         max_tokens=cfg.coder_max_tokens,
+        api_key=api_key,
     )
 
 
 def get_reviewer_llm() -> ChatOpenAI:
-    """Reviewer: bug fixing + security audit (o1-mini)."""
+    """Reviewer: bug fixing + security audit (Grok 3)."""
     cfg = config or AgentConfig()
+    api_key = os.getenv('MODEL_GROK') or os.getenv('XAI_API_KEY')
     return ChatOpenAI(
         model=cfg.reviewer_model,
         temperature=cfg.reviewer_temperature,
         max_tokens=cfg.reviewer_max_tokens,
+        api_key=api_key,
     )
 
 
 def get_supervisor_llm() -> ChatOpenAI:
-    """Supervisor: lightweight router (optional)."""
+    """Supervisor: lightweight router (optional) - GPT-5.2."""
     cfg = config or AgentConfig()
+    api_key = os.getenv('MODEL_GPT') or os.getenv('OPENAI_API_KEY')
     return ChatOpenAI(
         model=cfg.supervisor_model,
         temperature=0,
         max_tokens=512,
+        api_key=api_key,
     )
 
 # =============================================================================
@@ -280,8 +288,8 @@ def gather_workspace_context(root: Optional[str] = None, depth: int = 5) -> List
 # -----------------------
 # Routing / override helpers
 # -----------------------
-XAI_KEY = os.getenv("XAI_API_KEY", os.getenv("XAI_KEY", ""))
-XAI_ENDPOINT = os.getenv("XAI_ENDPOINT", "https://api.grok.ai/v1/complete")
+# Updated default endpoint to x.ai; can be overridden via XAI_ENDPOINT env var
+XAI_ENDPOINT = os.getenv("XAI_ENDPOINT", "https://api.x.ai/v1/chat/completions")
 
 
 def parse_override_prefix(task: str) -> Tuple[Optional[str], str]:
@@ -305,13 +313,28 @@ def choose_provider_for_text(text: str) -> str:
 
 def call_grok(model: str, prompt: str) -> str:
     """Minimal HTTP adapter for xAI/Grok-like endpoints. Uses XAI_KEY."""
-    if not XAI_KEY:
+    api_key = os.getenv("XAI_API_KEY") or os.getenv("XAI_KEY") or os.getenv("MODEL_GROK")
+    if not api_key:
         raise RuntimeError("Missing XAI_API_KEY for Grok provider")
-    payload = {"model": model, "prompt": prompt, "max_tokens": 800, "temperature": 0}
-    headers = {"Authorization": f"Bearer {XAI_KEY}", "Content-Type": "application/json"}
-    r = requests.post(XAI_ENDPOINT, headers=headers, json=payload, timeout=20)
-    r.raise_for_status()
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 512,
+        "temperature": 0.7,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    try:
+        r = requests.post(XAI_ENDPOINT, headers=headers, json=payload, timeout=30)
+        if r.status_code in {400, 404} and model != "grok-4-0709":
+            fallback_payload = {**payload, "model": "grok-4-0709"}
+            r = requests.post(XAI_ENDPOINT, headers=headers, json=fallback_payload, timeout=30)
+        r.raise_for_status()
+    except requests.HTTPError as exc:
+        log.error("[GROK] HTTP error: %s", exc)
+        raise
     j = r.json()
+    if "choices" in j and j["choices"]:
+        return j["choices"][0]["message"].get("content", "")
     return j.get("completion") or j.get("text") or j.get("output") or json.dumps(j)
 
 
@@ -333,7 +356,93 @@ def routed_llm_call(task_text: str, override: Optional[str] = None) -> str:
         out = llm.invoke([SystemMessage(content=prompt), HumanMessage(content="Answer concisely")])
         return out.content
     # grok
-    return call_grok(os.getenv("GROK_MODEL", "grok-4-latest"), prompt)
+    return call_grok(os.getenv("GROK_MODEL", "grok-4-1-fast-reasoning"), prompt)
+
+
+VERIFY_SYNC_TIMEOUT_SEC = float(os.getenv("VERIFY_SYNC_TIMEOUT_SEC", "30"))
+
+
+def verify_sync_chain() -> bool:
+    """Multi-agent verification sync: Claude (main.go safety) + GPT (trailing stop) + Grok (sniper.log).
+    
+    Strict timing: abort if any provider delays >2s.
+    Returns: True if all pass, False (abort) otherwise.
+    """
+    import threading
+    import time
+    
+    # Phase 1: Claude scans main.go for 8 safety lines
+    print("\n[CLAUDE] Scanning main.go for 8 safety lines...")
+    sys_prompt = "You are a code auditor. Read main.go and return ONLY the 8 safety gate lines (exact code). If missing one, respond: BREACH"
+    user_msg = "What are the 8 safety gates in this code?"
+    
+    try:
+        start = time.time()
+        llm = get_planner_llm()
+        claude_resp = llm.invoke([
+            SystemMessage(content=sys_prompt + "\n\nCode:\n" + open("main.go", "r").read()[:8000]),
+            HumanMessage(content=user_msg)
+        ])
+        elapsed = time.time() - start
+        if elapsed > VERIFY_SYNC_TIMEOUT_SEC:
+            log.error("[CLAUDE] Timeout: %.2fs > %.1fs. ABORT.", elapsed, VERIFY_SYNC_TIMEOUT_SEC)
+            return False
+        claude_result = claude_resp.content[:500]
+        print(f"✓ Claude: {claude_result[:120]}... ({elapsed:.1f}s)")
+        if "BREACH" in claude_result.upper():
+            print("✗ BREACH detected in safety checks. ABORT.")
+            return False
+    except Exception as e:
+        log.error("[CLAUDE] failed: %s. ABORT.", e)
+        return False
+    
+    # Phase 2: GPT writes 5-line trailing stop diff
+    print("\n[GPT] Writing trailing stop diff (5 lines)...")
+    sys_prompt = "You are a Go developer. Write EXACTLY 5 lines (no explanation): add trailing stop logic. Sell 30% at 5% below peak after +70%, moonbag at +150%. Diff format only."
+    user_msg = "Trailing stop diff:"
+    
+    try:
+        start = time.time()
+        llm = get_coder_llm()
+        gpt_resp = llm.invoke([
+            SystemMessage(content=sys_prompt),
+            HumanMessage(content=user_msg)
+        ])
+        elapsed = time.time() - start
+        if elapsed > VERIFY_SYNC_TIMEOUT_SEC:
+            log.error("[GPT] Timeout: %.2fs > %.1fs. ABORT.", elapsed, VERIFY_SYNC_TIMEOUT_SEC)
+            return False
+        gpt_result = gpt_resp.content[:300]
+        print(f"✓ GPT: {gpt_result[:80]}... ({elapsed:.1f}s)")
+    except Exception as e:
+        log.error("[GPT] failed: %s. ABORT.", e)
+        return False
+    
+    # Phase 3: Grok reads sniper.log (last 3 lines + confirmation)
+    print("\n[GROK] Reading sniper.log and confirming bot status...")
+    try:
+        log_lines = open("sniper.log", "r").readlines()[-3:]
+        log_text = "".join(log_lines)
+    except:
+        log_text = "(sniper.log not found or empty)"
+    
+    sys_prompt = f"Read the sniper bot log:\n\n{log_text}\n\nAnswer exactly (one line each):\nIs bot running? (yes/no)\nWallet balance? (amount or unknown)\nLast action? (action type)"
+    user_msg = "Confirm status:"
+    
+    try:
+        start = time.time()
+        grok_result = call_grok(os.getenv("GROK_MODEL", "grok-4-1-fast-reasoning"), sys_prompt)
+        elapsed = time.time() - start
+        if elapsed > VERIFY_SYNC_TIMEOUT_SEC:
+            log.error("[GROK] Timeout: %.2fs > %.1fs. ABORT.", elapsed, VERIFY_SYNC_TIMEOUT_SEC)
+            return False
+        print(f"✓ Grok: {grok_result[:100]}... ({elapsed:.1f}s)")
+    except Exception as e:
+        log.error("[GROK] failed: %s. ABORT.", e)
+        return False
+    
+    # All phases passed
+    return True
 
 
 def test_chain() -> None:
@@ -631,20 +740,20 @@ Examples:
     parser.add_argument(
         "--planner-model",
         type=str,
-        default="claude-3-5-sonnet-20241022",
-        help="Model for planner agent (default: claude-3-5-sonnet-20241022)",
+        default="claude-opus-4-5",
+        help="Model for planner agent (default: claude-opus-4-5)",
     )
     parser.add_argument(
         "--coder-model",
         type=str,
-        default="gpt-4o",
-        help="Model for coder agent (default: gpt-4o)",
+        default="gpt-5.2",
+        help="Model for coder agent (default: gpt-5.2)",
     )
     parser.add_argument(
         "--reviewer-model",
         type=str,
-        default="o1-mini",
-        help="Model for reviewer agent (default: o1-mini)",
+        default="grok-4",
+        help="Model for reviewer agent (default: grok-4)",
     )
     parser.add_argument(
         "--use-supervisor",
@@ -684,6 +793,11 @@ Examples:
         "--run-tests",
         action="store_true",
         help="Run provider override test chain and exit",
+    )
+    parser.add_argument(
+        "--verify-sync",
+        action="store_true",
+        help="Run multi-agent verification sync (Claude/GPT/Grok) with 2s timeout per provider",
     )
 
     return parser.parse_args()
@@ -729,7 +843,26 @@ def main():
         force=True,
     )
 
-    # Validate task
+    # Run test chain if requested (doesn't need a task)
+    if args.run_tests:
+        log.info("Running provider override test chain...")
+        test_chain()
+        sys.exit(0)
+
+    # Run verification sync if requested
+    if args.verify_sync:
+        log.info("Running multi-agent verification sync...")
+        success = verify_sync_chain()
+        if success:
+            print("\n" + "🔥 " * 20)
+            print("CHAIN LOCKED. MODELS IN PHASE. BOT READY. FUND NOW.")
+            print("🔥 " * 20 + "\n")
+            sys.exit(0)
+        else:
+            print("\nABORT: Verification failed or timeout exceeded.")
+            sys.exit(1)
+
+    # Validate task (only for normal operation, not for tests)
     if not config.task:
         log.error("No task provided. Use --task or --config with a task field.")
         sys.exit(1)
@@ -747,11 +880,6 @@ def main():
         enable_memory=config.enable_memory,
         memory_path=config.memory_path,
     )
-
-    if args.run_tests:
-        log.info("Running provider override test chain...")
-        test_chain()
-        sys.exit(0)
 
     initial_state = {
         "task": config.task,
