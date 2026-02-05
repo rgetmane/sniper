@@ -186,6 +186,8 @@ type Config struct {
 	SimulateFirst   bool
 	JitoTipLamports uint64
 	JitoEndpoint    string
+	MaxFailedBuys   int
+	ProgramWhitelist map[string]bool
 }
 
 // ============================================================================
@@ -286,6 +288,12 @@ func loadConfig() {
 		SimulateFirst:   envBool("SIMULATE_BEFORE_SEND", true),
 		JitoTipLamports: uint64(envInt("JITO_TIP_LAMPORTS", 2000)),
 		JitoEndpoint:    envString("JITO_ENDPOINT", "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles"),
+		MaxFailedBuys:   envInt("MAX_FAILED_BUYS", 3),
+		ProgramWhitelist: map[string]bool{
+			"JUP6LkbZbjwQRus81QE3E6Bg8JSqwhbzd69nWj2kxg8": true,
+			"9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFu": true,
+			"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": true,
+		},
 	}
 
 	required := []string{"HELIUS_API_KEY", "JUPITER_API_KEY"}
@@ -1226,6 +1234,17 @@ func checkRugCheck(ctx context.Context, mint string) (*RugCheckResponse, error) 
 // ============================================================================
 
 func buy(ctx context.Context, mint, symbol string, score float64, volSlippage int, volBuySOL float64) {
+	// FAIL-SAFE: Check if we've exceeded max failed buys
+	statsMu.RLock()
+	failedBuys := stats.FailedBuys
+	statsMu.RUnlock()
+	
+	if failedBuys >= int64(config.MaxFailedBuys) {
+		log.Printf("🔥 FORENSIC LOCK: Failed buys (%d) >= MAX_FAILED_BUYS (%d). HALTING.", failedBuys, config.MaxFailedBuys)
+		sendTelegram(fmt.Sprintf("🔥 FORENSIC LOCK ENGAGED\nFailed buys: %d / %d\nBot halted for safety.", failedBuys, config.MaxFailedBuys))
+		return
+	}
+
 	mu.Lock()
 	lastBuyTime = time.Now()
 	mu.Unlock()
@@ -1390,6 +1409,9 @@ func buy(ctx context.Context, mint, symbol string, score float64, volSlippage in
 
 	sendTelegram(fmt.Sprintf("🟢 BUY %s (%s)\n%.4f SOL | Score: %.0f\nhttps://solscan.io/tx/%s",
 		mint, symbol, config.MaxBuySOL, score, sig))
+
+	// FAIL-SAFE: Add 2-second delay between buys to prevent rapid drain
+	time.Sleep(2 * time.Second)
 
 	rotateWallet()
 
