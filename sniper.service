@@ -1,0 +1,15 @@
+[Unit]
+Description=Sniper Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/sniper
+ExecStart=/root/sniper/venv/bin/uvicorn mcp_service:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 120 --workers 1
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
